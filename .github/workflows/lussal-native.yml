@@ -1,0 +1,60 @@
+name: Build Lussal Native Edition
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/lussal-native.yml'
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: tsunehimatoi/psd2live
+          ref: v3.8.4
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - shell: pwsh
+        run: |
+          $p = 'build.gradle.kts'
+          $s = Get-Content $p -Raw
+          $s = $s.Replace('packageName = "PSD2Live"', 'packageName = "LussalAutoRigStudio"')
+          Set-Content $p $s -Encoding utf8
+          Get-ChildItem src/main/kotlin -Recurse -Filter *.kt | ForEach-Object {
+            $t = Get-Content $_.FullName -Raw
+            $n = $t.Replace('title = "PSD2Live"', 'title = "Lussal AutoRig Studio"')
+            if ($n -ne $t) { Set-Content $_.FullName $n -Encoding utf8 }
+          }
+          git diff | Out-File -Encoding utf8 lussal-changes.patch
+      - shell: pwsh
+        run: .\gradlew.bat createDistributable --no-daemon
+      - shell: pwsh
+        run: |
+          $exe = Get-ChildItem build/compose/binaries -Recurse -Filter LussalAutoRigStudio.exe | Select-Object -First 1
+          if (!$exe) { throw 'Native launcher not found' }
+          $root = $exe.Directory.FullName
+          $seven = "$env:ProgramFiles\7-Zip"
+          $sfx = Join-Path $seven '7z.sfx'
+          if (!(Test-Path $sfx)) { throw 'SFX module unavailable' }
+          & "$seven\7z.exe" a -t7z "$env:RUNNER_TEMP\portable.7z" "$root\*"
+          if ($LASTEXITCODE -ne 0) { throw 'Archive failed' }
+          $out = Join-Path $pwd 'LussalAutoRigStudio-Portable.exe'
+          $stream = [IO.File]::Create($out)
+          foreach ($f in @($sfx,"$env:RUNNER_TEMP\portable.7z")) { $b=[IO.File]::OpenRead($f); $b.CopyTo($stream); $b.Dispose() }
+          $stream.Dispose()
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lussal-native
+          path: |
+            LussalAutoRigStudio-Portable.exe
+            lussal-changes.patch
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "native-$env:GITHUB_RUN_ID" LussalAutoRigStudio-Portable.exe lussal-changes.patch --repo "${{ github.repository }}" --title "Lussal native edition (experimental)" --notes "GPL-3.0 based on https://github.com/tsunehimatoi/psd2live/tree/v3.8.4 . Source and modifications: upstream tag and attached patch. Self-extracting portable package; extract and launch the included application. Windows runtime and rigging not yet independently tested."
