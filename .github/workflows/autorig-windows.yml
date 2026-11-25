@@ -1,0 +1,27 @@
+name: Build AutoRig Windows
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'autorig/**'
+      - '.github/workflows/autorig-windows.yml'
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pyinstaller numpy pillow psd-tools opencv-python
+      - run: python -m PyInstaller --onefile --windowed --name LussalAutoRigStudio autorig/main.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LussalAutoRigStudio
+          path: dist/LussalAutoRigStudio.exe
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "autorig-$env:GITHUB_RUN_ID" dist/LussalAutoRigStudio.exe --title "AutoRig prototype $env:GITHUB_RUN_ID" --notes "Prototype; CMO3/MOC3 export not implemented."
